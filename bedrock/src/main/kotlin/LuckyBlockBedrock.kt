@@ -18,7 +18,7 @@ data class LuckyBlockVariant(
 data class UnparsedModConfig(
     val drops: String,
     val doDropsOnCreativeMode: Boolean = false,
-    val structures: dynamic, // structureId -> String
+    val dropStructures: dynamic, // structureId -> String
     val luck: Int,
     val variants: dynamic, // blockId -> LuckyBlockVariant
 )
@@ -44,9 +44,9 @@ fun registerModConfig(blockId: String, unparsedConfig: UnparsedModConfig) {
         }
     }
 
-    if (unparsedConfig.structures != null) {
-        for (k in js("Object").keys(unparsedConfig.structures)) {
-            val unparsedStruct: String = unparsedConfig.structures[k]
+    if (unparsedConfig.dropStructures != null) {
+        for (k in js("Object").keys(unparsedConfig.dropStructures)) {
+            val unparsedStruct: String = unparsedConfig.dropStructures[k]
             val dropStructure = readDropStructure(unparsedStruct.split('\n'))
             LuckyRegistry.registerDropStructure("$blockId:$k", dropStructure)
         }

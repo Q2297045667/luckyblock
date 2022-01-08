@@ -1,12 +1,7 @@
-import com.moowork.gradle.node.task.NodeTask
-import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 import java.io.File
-import java.util.UUID
-import org.apache.commons.text.CaseUtils
 
 plugins {
     kotlin("js")
-    id("com.moowork.node") version "1.3.1"
 }
 
 repositories {
@@ -21,7 +16,6 @@ dependencies {
 buildscript {
     dependencies {
         classpath(files("$rootDir/tools/build/classes"))
-        classpath("org.apache.commons:commons-text:1.9")
     }
 }
 
@@ -32,7 +26,7 @@ kotlin {
                 keep("luckyblock-bedrock.mod.lucky.bedrock.initServer")
             }
             webpackTask {
-                outputFileName = "serverScript.js"
+                outputFileName = "compiledServerScript.js"
                 devtool = "hidden-source-map"
             }
         }
@@ -41,6 +35,11 @@ kotlin {
 
 val addonDistDir = "$rootDir/bedrock/build/processedResources/js/main/addon"
 val bedrockTemplateAddonBlockId: String by project
+val nodeVersion: String by project
+
+rootProject.plugins.withType<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin> {
+    rootProject.the<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootExtension>().nodeVersion = nodeVersion
+}
 
 tasks.named<ProcessResources>("processResources") {
     from("../common/src/jvmMain/resources/game/assets/lucky/textures/blocks") {
@@ -98,58 +97,46 @@ tasks.register<JavaExec>("nbtToMcstructure") {
     dependsOn(project(":tools").tasks.getByName("installDist"))
 }
 
-tasks.register<Copy>("copyTemplateAddon") {
-    fun getUuid(suffix: String): String {
-        val bedrockTemplateAddonUuid = UUID.nameUUIDFromBytes(
-            "lucky:${bedrockTemplateAddonBlockId}".toByteArray()
-        ).toString()
-        return UUID.nameUUIDFromBytes("${bedrockTemplateAddonUuid}-${suffix}".toByteArray()).toString()
-    }
-
-    doFirst {
-        delete(fileTree("./build/processedResources/template-addon"))
-    }
-
-    from("./template-addon")
-    into("./build/template-addon")
-
-    inputs.property("blockId", bedrockTemplateAddonBlockId)
-    filesMatching(listOf("**/*.json", "**/*.lang")) {
-        expand(
-            "blockId" to bedrockTemplateAddonBlockId,
-            "addonId" to CaseUtils.toCamelCase(bedrockTemplateAddonBlockId, true, '_'),
-            "blockName" to bedrockTemplateAddonBlockId.split("_").joinToString(" ") {
-                it.capitalize() // TODO: use replaceFirstChar once gradle is updated to Kotlin 1.6
-            },
-            "behaviorPackUuid" to getUuid("behavior-pack"),
-            "behaviorPackModuleUuid" to getUuid("behavior-pack-module"),
-            "resourcePackUuid" to getUuid("resource-pack"),
-            "resourcePackModuleUuid" to getUuid("resource-pack-module"),
-        )
-    }
-    rename { fileName ->
-        fileName.replace("\${blockId}", "$bedrockTemplateAddonBlockId")
-    }
-}
-
 tasks.register<JavaExec>("buildTemplateAddon") {
+    doFirst {
+        delete("./build/template-addon")
+    }
     classpath = fileTree("$rootDir/tools/build/install/tools/lib")
     mainClass.set("mod.lucky.tools.MainKt")
     args = listOf(
         "generate-bedrock-config",
         "--inputConfigFolder",
         "./template-addon",
+        "--inputTemplateAddonFolder",
+        "./template-addon",
         "--outputAddonFolder",
         "./build/template-addon",
     )
     dependsOn(project(":tools").tasks.getByName("installDist"))
-    dependsOn("copyTemplateAddon")
+}
+
+tasks.register<JavaExec>("buildLuckyConfig") {
+    doFirst {
+        delete("./build/lucky-config")
+    }
+    classpath = fileTree("$rootDir/tools/build/install/tools/lib")
+    mainClass.set("mod.lucky.tools.MainKt")
+    args = listOf(
+        "generate-bedrock-config",
+        "--inputConfigFolder",
+        "./lucky-config",
+        "--inputTemplateAddonFolder",
+        "./lucky-config",
+        "--outputAddonFolder",
+        "./build/lucky-config",
+    )
+    dependsOn(project(":tools").tasks.getByName("installDist"))
 }
 
 tasks.register<Sync>("copyRuntimePacks") {
     val addonPaths = mapOf(
         "LuckyBlock" to "./build/processedResources/js/main/addon",
-        "LuckyBlockCustom" to "./build/processedResources/js/main/template-addons/template-addon-1-bedrock",
+        "TemplateAddon" to "./build/template-addon",
     )
 
     for ((addonName, addonPath) in addonPaths) {
@@ -162,7 +149,7 @@ tasks.register<Sync>("copyRuntimePacks") {
     }
 
     into("./run")
-    dependsOn("copyServerScript")
+    dependsOn("copyCompiledServerScript")
     dependsOn("clearStructures")
     dependsOn("generateBedrockDrops")
     dependsOn("nbtToMcstructure")
@@ -171,8 +158,10 @@ tasks.register<Sync>("copyRuntimePacks") {
     outputs.upToDateWhen { false }
 }
 
-tasks.register<Copy>("copyServerScript") {
-    from("./build/distributions/serverScript.js")
+tasks.register<Copy>("copyCompiledServerScript") {
+    from("./build/distributions/compiledServerScript.js") {
+        rename("compiledServerScript.js", "serverScript.js")
+    }
     into("$addonDistDir/behavior_pack/scripts/server")
 
     dependsOn("generateBedrockDrops")
@@ -190,10 +179,10 @@ tasks.register<Zip>("zipPack") {
 tasks.named("build").configure {
     tasks.getByName("browserProductionWebpack").dependsOn("generateBedrockDrops")
     tasks.getByName("browserProductionWebpack").inputs.file("./build/processedResources/serverScript.js")
-    tasks.getByName("copyServerScript").dependsOn("browserProductionWebpack")
+    tasks.getByName("copyCompiledServerScript").dependsOn("browserProductionWebpack")
     tasks.getByName("dist").dependsOn("browserProductionWebpack")
     dependsOn("browserProductionWebpack")
-    dependsOn("copyServerScript")
+    dependsOn("copyCompiledServerScript")
     dependsOn("dist")
     dependsOn("copyRuntimePacks")
 }
@@ -201,8 +190,8 @@ tasks.named("build").configure {
 tasks.register("buildDev").configure {
     tasks.getByName("browserDevelopmentWebpack").dependsOn("generateBedrockDrops")
     tasks.getByName("browserDevelopmentWebpack").inputs.file("./build/processedResources/generated-config.js")
-    tasks.getByName("copyServerScript").dependsOn("browserDevelopmentWebpack")
+    tasks.getByName("copyCompiledServerScript").dependsOn("browserDevelopmentWebpack")
     dependsOn("browserDevelopmentWebpack")
-    dependsOn("copyServerScript")
+    dependsOn("copyCompiledServerScript")
     dependsOn("copyRuntimePacks")
 }

@@ -16,6 +16,7 @@ dependencies {
     implementation("com.charleskorn.kaml:kaml:0.37.0")
     implementation("org.jsoup:jsoup:1.14.3")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.1")
+    implementation("org.apache.commons:commons-text:1.9")
     testImplementation(kotlin("test"))
 }
 
